@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MiniLang Playground — ByteForge</title>
+<style>
+  :root {
+    --navy: #1b2a4a;
+    --navy-dark: #101a30;
+    --accent: #3b5bdb;
+    --bg: #f4f6fb;
+    --panel: #ffffff;
+    --border: #dde3ef;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --ok: #1a7f4e;
+    --err: #c0392b;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    background: linear-gradient(135deg, var(--navy), var(--navy-dark));
+    color: #fff;
+    padding: 18px 28px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 { font-size: 1.15rem; margin: 0; font-weight: 700; letter-spacing: 0.2px; }
+  header .sub { color: #b9c3e0; font-size: 0.85rem; }
+  #status { font-size: 0.8rem; color: #b9c3e0; }
+  #status.ok { color: #8ee6ac; }
+  #status.err { color: #ff9f8f; }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 480px;
+  }
+  .panel .panel-head {
+    background: #eef1f9;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .panel .panel-head h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  textarea#source {
+    flex: 1;
+    border: none;
+    resize: none;
+    padding: 14px;
+    font-family: var(--mono);
+    font-size: 0.92rem;
+    line-height: 1.5;
+    outline: none;
+    tab-size: 4;
+  }
+
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, button {
+    font-family: inherit;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    padding: 7px 12px;
+    background: #fff;
+    cursor: pointer;
+  }
+  label.chk {
+    font-size: 0.82rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  button.primary:hover { background: #2f4bc0; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: #fafbfd;
+    overflow-x: auto;
+  }
+  .tab {
+    padding: 9px 16px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active {
+    color: var(--navy);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  pre#output {
+    flex: 1;
+    margin: 0;
+    padding: 14px;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  pre#output.empty { color: var(--muted); font-style: italic; }
+  pre#output.error { color: var(--err); }
+
+  .exit-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .exit-badge.ok { background: #e3f6ea; color: var(--ok); }
+  .exit-badge.err { background: #fbe6e2; color: var(--err); }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    padding: 16px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>MiniLang Playground</h1>
+    <div class="sub">Team ByteForge — web front-end for the Flex/Bison Mini Language compiler</div>
+  </div>
+  <div id="status">checking backend…</div>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Source</h2>
+      <div class="controls">
+        <select id="exampleSelect"><option value="">Load example…</option></select>
+        <label class="chk"><input type="checkbox" id="optFlag"> -O (optimize)</label>
+        <label class="chk"><input type="checkbox" id="runFlag"> -run (execute)</label>
+        <button class="primary" id="compileBtn">Compile ▶</button>
+      </div>
+    </div>
+    <textarea id="source" spellcheck="false" placeholder="int x;
+x = 5;
+print x;"></textarea>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Result</h2>
+      <span id="exitBadge"></span>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <pre id="output" class="empty">Write some MiniLang source on the left and press Compile.</pre>
+  </section>
+</main>
+
+<footer>
+  This UI is a thin client over the real <code>minilangc</code> CLI (built from <code>src/</code> via the project's own Makefile) —
+  every result shown here comes from the actual compiler binary, not a reimplementation.
+</footer>
+
+<script>
+const API_BASE = window.API_BASE || "http://localhost:5001";
+
+const $ = (sel) => document.querySelector(sel);
+const sourceEl = $("#source");
+const outputEl = $("#output");
+const statusEl = $("#status");
+const exitBadge = $("#exitBadge");
+const tabsEl = $("#tabs");
+const exampleSelect = $("#exampleSelect");
+
+let lastSections = {};
+let activeTab = null;
+
+async function checkHealth() {
+  try {
+    const res = await fetch(`${API_BASE}/api/health`);
+    const data = await res.json();
+    if (data.binary) {
+      statusEl.textContent = "backend connected — compiler binary found";
+      statusEl.className = "ok";
+    } else {
+      statusEl.textContent = "backend connected — run `make` in project root first";
+      statusEl.className = "err";
+    }
+  } catch (e) {
+    statusEl.textContent = "backend unreachable (start web/backend/server.py)";
+    statusEl.className = "err";
+  }
+}
+
+async function loadExamples() {
+  try {
+    const res = await fetch(`${API_BASE}/api/examples`);
+    const files = await res.json();
+    files.forEach((f) => {
+      const opt = document.createElement("option");
+      opt.value = f;
+      opt.textContent = f;
+      exampleSelect.appendChild(opt);
+    });
+  } catch (e) { /* backend not up yet; ignore */ }
+}
+
+exampleSelect.addEventListener("change", async () => {
+  const name = exampleSelect.value;
+  if (!name) return;
+  const res = await fetch(`${API_BASE}/api/examples/${encodeURIComponent(name)}`);
+  const data = await res.json();
+  if (data.source !== undefined) sourceEl.value = data.source;
+});
+
+function renderTabs() {
+  tabsEl.innerHTML = "";
+  const titles = Object.keys(lastSections);
+  if (titles.length === 0) return;
+  if (!titles.includes(activeTab)) activeTab = titles[0];
+  titles.forEach((title) => {
+    const tab = document.createElement("div");
+    tab.className = "tab" + (title === activeTab ? " active" : "");
+    tab.textContent = title;
+    tab.onclick = () => { activeTab = title; renderTabs(); renderOutput(); };
+    tabsEl.appendChild(tab);
+  });
+}
+
+function renderOutput() {
+  outputEl.className = "";
+  outputEl.textContent = lastSections[activeTab] || "(empty)";
+}
+
+$("#compileBtn").addEventListener("click", async () => {
+  const btn = $("#compileBtn");
+  btn.disabled = true;
+  btn.textContent = "Compiling…";
+  exitBadge.textContent = "";
+  try {
+    const res = await fetch(`${API_BASE}/api/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: sourceEl.value,
+        optimize: $("#optFlag").checked,
+        run: $("#runFlag").checked,
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok && data.error) {
+      lastSections = { "Error": data.error };
+      activeTab = "Error";
+      renderTabs();
+      outputEl.className = "error";
+      outputEl.textContent = data.error;
+      exitBadge.textContent = "backend error";
+      exitBadge.className = "exit-badge err";
+      return;
+    }
+
+    const hasSections = Object.keys(data.sections || {}).length > 0;
+    if (hasSections) {
+      lastSections = { ...data.sections };
+      if (data.stderr && data.stderr.trim()) {
+        lastSections["Diagnostics (stderr)"] = data.stderr.trim();
+      }
+    } else {
+      const combined = (data.stdout || "") + (data.stderr ? "\n" + data.stderr : "");
+      lastSections = { "Raw Output": combined.trim() || "(no output)" };
+    }
+
+    activeTab = null;
+    renderTabs();
+    renderOutput();
+
+    if (data.timed_out) {
+      exitBadge.textContent = "timed out (>5s)";
+    } else {
+      exitBadge.textContent = data.ok ? `exit 0` : `exit ${data.exit_code}`;
+    }
+    exitBadge.className = "exit-badge " + (data.ok ? "ok" : "err");
+  } catch (e) {
+    outputEl.className = "error";
+    outputEl.textContent = "Request failed: " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Compile ▶";
+  }
+});
+
+checkHealth();
+loadExamples();
+</script>
+
+</body>
+</html>
