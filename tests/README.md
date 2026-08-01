@@ -4,25 +4,21 @@ Per the project manual (Section 15), every required category is covered:
 
 | Category | Files |
 |---|---|
-| Successful compilation | `valid/sample_program.mc`, `valid/arithmetic_and_scoping.mc` |
+| Successful compilation | `valid/sample_program.mc`, `valid/arithmetic_and_scoping.mc`, `valid/advanced_features.mc` |
 | Lexical errors | `lexical_errors/invalid_characters.mc` |
 | Syntax errors | `syntax_errors/missing_paren.mc`, `syntax_errors/multiple_errors_recovery.mc` |
 | Semantic errors (one per Section 4.5 rule) | `semantic_errors/undeclared_variable.mc`, `redeclaration.mc`, `scope_violation.mc`, `type_mismatch.mc`, `invalid_assignment.mc`, `invalid_expression.mc` |
+| Advanced/unique extension errors (not required by the manual — see `docs/advanced_features.md`) | `semantic_errors/advanced_feature_errors.mc` (array/switch-specific rules) |
 
 ## A note on how "expected output" below was derived
 
-Flex and Bison were not available in the sandbox this project was
-built in (see the root README's "A note on how this was verified"
-section), so `src/lexer/lexer.l` and `src/parser/parser.y` could not
-be executed directly. Everything below **except** the exact wording of
-Bison's own syntax-error messages was verified for real: the semantic
-analyzer and TAC generator were exercised directly against
-hand-built ASTs (see `verification/`), including the exact AST for
-`valid/sample_program.mc` (it's the manual's own sample program) — so
-that file's expected TAC output below is copy-pasted from an actual
-program run, not hand-traced. The six semantic-error expected messages
-below are equally exact, since `report_error`'s format strings are
-fully under this project's control and were exercised directly.
+This whole suite has now actually been built and run with real Flex,
+Bison, and GCC (`make`, `make test`, `make test-run`) — every file
+below was verified by actually executing the compiled `minilangc`,
+not traced by hand. `make test-run` additionally runs every `valid/`
+program through `-O -run`, actually executing the generated TAC and
+printing real output, cross-checked against each file's own comments
+documenting the expected result.
 
 The one thing that could not be pinned down exactly is Bison's own
 generated wording for syntax errors (`%define parse.error verbose`'s
