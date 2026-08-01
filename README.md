@@ -86,6 +86,8 @@ examples/               small demo-friendly sample programs, including
                         advanced_*.mc examples (arrays/string/switch/read)
 verification/           harnesses that test semantic.c/tac.c directly,
                         bypassing the parser — see its own README
+web/                    optional browser playground (frontend + backend)
+                        for minilangc — see web/README.md
 Makefile
 ```
 
