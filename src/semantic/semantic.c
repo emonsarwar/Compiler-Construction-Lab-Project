@@ -16,6 +16,12 @@ static DataType analyze_expr(ASTNode *node, Scope *scope);
  * cannot nest (see parser.y), so this never needs to be a stack. */
 static ASTNode *current_function = NULL;
 
+/* Advanced/unique extension: how many `switch` statements we're
+ * currently nested inside — used only to validate `break;` isn't used
+ * outside one. (This language has no loop-`break`, only switch-`break`,
+ * so there's no ambiguity to resolve between the two.) */
+static int switch_depth = 0;
+
 static int is_numeric(DataType t) { return t == TYPE_INT || t == TYPE_FLOAT; }
 
 /* int -> float is a lossless implicit widening (same rule as C/Java/C#);
@@ -43,6 +49,14 @@ static int check_numeric_operands(ASTNode *node, const char *op, DataType lt, Da
 static DataType check_binop(ASTNode *node, DataType lt, DataType rt) {
     const char *op = node->as.binop.op;
     if (lt == TYPE_UNKNOWN || rt == TYPE_UNKNOWN) return TYPE_UNKNOWN; /* already reported below */
+
+    /* Advanced/unique extension: '+' also means string concatenation
+     * when BOTH operands are type 'string' (kept strict — no implicit
+     * number-to-string coercion — so this stays additive rather than
+     * changing '+''s existing numeric behavior at all). */
+    if (!strcmp(op, "+") && lt == TYPE_STRING && rt == TYPE_STRING) {
+        return TYPE_STRING;
+    }
 
     if (!strcmp(op, "+") || !strcmp(op, "-") || !strcmp(op, "*") || !strcmp(op, "/")) {
         if (!check_numeric_operands(node, op, lt, rt)) {
@@ -160,6 +174,30 @@ static DataType analyze_expr(ASTNode *node, Scope *scope) {
         case AST_INT_LIT:   node->type = TYPE_INT;   return TYPE_INT;
         case AST_FLOAT_LIT: node->type = TYPE_FLOAT; return TYPE_FLOAT;
         case AST_BOOL_LIT:  node->type = TYPE_BOOL;  return TYPE_BOOL;
+        case AST_STRING_LIT: node->type = TYPE_STRING; return TYPE_STRING;
+
+        /* Advanced/unique extension: array element read. */
+        case AST_ARRAY_ACCESS: {
+            const char *name = node->as.array_access.name;
+            Symbol *sym = symtab_lookup(scope, name);
+            DataType idx_type = analyze_expr(node->as.array_access.index, scope);
+            if (!sym) {
+                report_error("Semantic", node->line, "undeclared variable '%s' used", name);
+                node->type = TYPE_UNKNOWN;
+                return TYPE_UNKNOWN;
+            }
+            if (!sym->is_array) {
+                report_error("Semantic", node->line, "'%s' is not an array and cannot be indexed", name);
+                node->type = TYPE_UNKNOWN;
+                return TYPE_UNKNOWN;
+            }
+            if (idx_type != TYPE_INT && idx_type != TYPE_UNKNOWN) {
+                report_error("Semantic", node->line,
+                    "invalid expression: array index must be type 'int', found '%s'", datatype_to_string(idx_type));
+            }
+            node->type = sym->type;
+            return sym->type;
+        }
 
         case AST_IDENT: {
             Symbol *sym = symtab_lookup(scope, node->as.ident.name);
@@ -357,6 +395,95 @@ static void analyze_stmt(ASTNode *node, Scope *scope) {
                 report_error("Semantic", node->line,
                     "invalid expression: '%s' requires a numeric operand, found '%s'",
                     node->as.incdec.op, datatype_to_string(sym->type));
+            }
+            break;
+        }
+
+        /* --- Advanced/unique extensions --- */
+
+        case AST_ARRAY_DECL: {
+            const char *name = node->as.array_decl.name;
+            if (node->as.array_decl.size <= 0) {
+                report_error("Semantic", node->line, "array '%s' must have a positive size", name);
+            }
+            if (!symtab_insert_array(scope, name, node->as.array_decl.elem_type, node->as.array_decl.size, node->line)) {
+                report_error("Semantic", node->line, "redeclaration of variable '%s'", name);
+            }
+            break;
+        }
+
+        case AST_ARRAY_ASSIGN: {
+            const char *name = node->as.array_assign.name;
+            Symbol *sym = symtab_lookup(scope, name);
+            DataType idx_type = analyze_expr(node->as.array_assign.index, scope);
+            DataType value_type = analyze_expr(node->as.array_assign.value, scope);
+            if (!sym) {
+                report_error("Semantic", node->line, "undeclared variable '%s' used in assignment", name);
+                break;
+            }
+            if (!sym->is_array) {
+                report_error("Semantic", node->line, "'%s' is not an array and cannot be indexed", name);
+                break;
+            }
+            if (idx_type != TYPE_INT && idx_type != TYPE_UNKNOWN) {
+                report_error("Semantic", node->line,
+                    "invalid expression: array index must be type 'int', found '%s'", datatype_to_string(idx_type));
+            }
+            if (!types_assignable(sym->type, value_type)) {
+                report_error("Semantic", node->line,
+                    "invalid assignment: cannot assign a value of type '%s' to array '%s' of element type '%s'",
+                    datatype_to_string(value_type), name, datatype_to_string(sym->type));
+            }
+            break;
+        }
+
+        /* switch's subject and every `case` label must be type int
+         * (case labels are always int literals — see parser.y); each
+         * case body gets its own nested scope, same as if/while. */
+        case AST_SWITCH: {
+            DataType subj_type = analyze_expr(node->as.switch_stmt.subject, scope);
+            if (subj_type != TYPE_INT && subj_type != TYPE_UNKNOWN) {
+                report_error("Semantic", node->line,
+                    "switch subject must be type 'int', found '%s'", datatype_to_string(subj_type));
+            }
+            switch_depth++;
+            int seen_default = 0;
+            for (int i = 0; i < node->as.switch_stmt.case_count; i++) {
+                SwitchCase *c = &node->as.switch_stmt.cases[i];
+                if (c->is_default) {
+                    if (seen_default) {
+                        report_error("Semantic", node->line, "switch statement has more than one 'default' arm");
+                    }
+                    seen_default = 1;
+                } else {
+                    for (int j = 0; j < i; j++) {
+                        SwitchCase *prev = &node->as.switch_stmt.cases[j];
+                        if (!prev->is_default && prev->value->as.int_lit.value == c->value->as.int_lit.value) {
+                            report_error("Semantic", node->line,
+                                "duplicate 'case %d' in switch statement", c->value->as.int_lit.value);
+                        }
+                    }
+                }
+                analyze_block(c->body, scope);
+            }
+            switch_depth--;
+            break;
+        }
+
+        case AST_BREAK:
+            if (switch_depth == 0) {
+                report_error("Semantic", node->line, "'break' used outside of a switch statement");
+            }
+            break;
+
+        /* `read` (advanced feature): the target must already be a
+         * declared variable (or array element) of a readable type —
+         * reuses AST_IDENT / AST_ARRAY_ACCESS analysis as-is, so all the
+         * usual undeclared/scope-violation checks apply for free. */
+        case AST_READ: {
+            DataType t = analyze_expr(node->as.read_stmt.target, scope);
+            if (t == TYPE_VOID) {
+                report_error("Semantic", node->line, "cannot read a value into this target");
             }
             break;
         }

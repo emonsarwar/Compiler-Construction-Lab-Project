@@ -10,6 +10,7 @@ const char *datatype_to_string(DataType t) {
         case TYPE_INT:     return "int";
         case TYPE_FLOAT:   return "float";
         case TYPE_BOOL:    return "bool";
+        case TYPE_STRING:  return "string";
         case TYPE_VOID:    return "void";
         case TYPE_UNKNOWN: return "unknown";
     }
@@ -192,6 +193,75 @@ ASTNode *ast_new_incdec(int line, char *name, const char *op) {
     return node;
 }
 
+/* --- Advanced/unique extensions (beyond the manual's bonus list) --- */
+
+ASTNode *ast_new_string_lit(int line, char *value) {
+    ASTNode *node = ast_alloc(AST_STRING_LIT, line);
+    node->as.string_lit.value = value;
+    node->type = TYPE_STRING;
+    return node;
+}
+
+ASTNode *ast_new_array_decl(int line, DataType elem_type, char *name, int size) {
+    ASTNode *node = ast_alloc(AST_ARRAY_DECL, line);
+    node->as.array_decl.elem_type = elem_type;
+    node->as.array_decl.name = name;
+    node->as.array_decl.size = size;
+    node->type = TYPE_VOID;
+    return node;
+}
+
+ASTNode *ast_new_array_assign(int line, char *name, ASTNode *index, ASTNode *value) {
+    ASTNode *node = ast_alloc(AST_ARRAY_ASSIGN, line);
+    node->as.array_assign.name = name;
+    node->as.array_assign.index = index;
+    node->as.array_assign.value = value;
+    node->type = TYPE_VOID;
+    return node;
+}
+
+ASTNode *ast_new_array_access(int line, char *name, ASTNode *index) {
+    ASTNode *node = ast_alloc(AST_ARRAY_ACCESS, line);
+    node->as.array_access.name = name;
+    node->as.array_access.index = index;
+    return node;
+}
+
+ASTNode *ast_new_switch(int line, ASTNode *subject) {
+    ASTNode *node = ast_alloc(AST_SWITCH, line);
+    node->as.switch_stmt.subject = subject;
+    node->as.switch_stmt.case_count = 0;
+    node->as.switch_stmt.case_capacity = 4;
+    node->as.switch_stmt.cases = (SwitchCase *)malloc(sizeof(SwitchCase) * (size_t)node->as.switch_stmt.case_capacity);
+    node->type = TYPE_VOID;
+    return node;
+}
+
+void ast_switch_add_case(ASTNode *sw, ASTNode *value, ASTNode *body) {
+    SwitchData *sd = &sw->as.switch_stmt;
+    if (sd->case_count == sd->case_capacity) {
+        sd->case_capacity *= 2;
+        sd->cases = (SwitchCase *)realloc(sd->cases, sizeof(SwitchCase) * (size_t)sd->case_capacity);
+    }
+    sd->cases[sd->case_count].is_default = (value == NULL);
+    sd->cases[sd->case_count].value = value;
+    sd->cases[sd->case_count].body = body;
+    sd->case_count++;
+}
+
+ASTNode *ast_new_break(int line) {
+    ASTNode *node = ast_alloc(AST_BREAK, line);
+    node->type = TYPE_VOID;
+    return node;
+}
+
+ASTNode *ast_new_read(int line, ASTNode *target) {
+    ASTNode *node = ast_alloc(AST_READ, line);
+    node->as.read_stmt.target = target;
+    node->type = TYPE_VOID;
+    return node;
+}
+
 ParamList *ast_param_list_new(void) {
     ParamList *list = (ParamList *)malloc(sizeof(ParamList));
     list->count = 0;
@@ -232,6 +302,29 @@ void ast_arg_list_add(ArgList *list, ASTNode *arg) {
 
 void ast_arg_list_free(ArgList *list) {
     free(list); /* NOT list->args — ownership already transferred to the CallData that consumed it */
+}
+
+CaseList *ast_case_list_new(void) {
+    CaseList *list = (CaseList *)malloc(sizeof(CaseList));
+    list->count = 0;
+    list->capacity = 4;
+    list->items = (CaseItem *)malloc(sizeof(CaseItem) * (size_t)list->capacity);
+    return list;
+}
+
+void ast_case_list_add(CaseList *list, ASTNode *value, ASTNode *body) {
+    if (list->count == list->capacity) {
+        list->capacity *= 2;
+        list->items = (CaseItem *)realloc(list->items, sizeof(CaseItem) * (size_t)list->capacity);
+    }
+    list->items[list->count].value = value;
+    list->items[list->count].body = body;
+    list->count++;
+}
+
+void ast_case_list_free(CaseList *list) {
+    free(list->items);
+    free(list);
 }
 
 /* --- Printing --- */
@@ -382,6 +475,62 @@ void ast_print(const ASTNode *node, int indent) {
             print_indent(indent);
             printf("IncDec %s%s  (line %d)\n", node->as.incdec.name, node->as.incdec.op, node->line);
             break;
+
+        /* --- Advanced/unique extensions --- */
+
+        case AST_STRING_LIT:
+            print_indent(indent);
+            printf("StringLit \"%s\"\n", node->as.string_lit.value);
+            break;
+
+        case AST_ARRAY_DECL:
+            print_indent(indent);
+            printf("ArrayDecl <%s[%d]> %s  (line %d)\n",
+                   datatype_to_string(node->as.array_decl.elem_type),
+                   node->as.array_decl.size, node->as.array_decl.name, node->line);
+            break;
+
+        case AST_ARRAY_ASSIGN:
+            print_indent(indent);
+            printf("ArrayAssign %s[...] =  (line %d)\n", node->as.array_assign.name, node->line);
+            print_indent(indent + 1); printf("Index:\n");
+            ast_print(node->as.array_assign.index, indent + 2);
+            print_indent(indent + 1); printf("Value:\n");
+            ast_print(node->as.array_assign.value, indent + 2);
+            break;
+
+        case AST_ARRAY_ACCESS:
+            print_indent(indent);
+            printf("ArrayAccess %s[...]  : %s  (line %d)\n",
+                   node->as.array_access.name, datatype_to_string(node->type), node->line);
+            ast_print(node->as.array_access.index, indent + 1);
+            break;
+
+        case AST_SWITCH:
+            print_indent(indent);
+            printf("Switch  (line %d)\n", node->line);
+            print_indent(indent + 1); printf("Subject:\n");
+            ast_print(node->as.switch_stmt.subject, indent + 2);
+            for (int i = 0; i < node->as.switch_stmt.case_count; i++) {
+                SwitchCase *c = &node->as.switch_stmt.cases[i];
+                print_indent(indent + 1);
+                if (c->is_default) printf("Default:\n");
+                else printf("Case:\n");
+                if (!c->is_default) ast_print(c->value, indent + 2);
+                ast_print(c->body, indent + 2);
+            }
+            break;
+
+        case AST_BREAK:
+            print_indent(indent);
+            printf("Break  (line %d)\n", node->line);
+            break;
+
+        case AST_READ:
+            print_indent(indent);
+            printf("Read  (line %d)\n", node->line);
+            ast_print(node->as.read_stmt.target, indent + 1);
+            break;
     }
 }
 
@@ -432,6 +581,13 @@ static int dot_visit(const ASTNode *node, FILE *out, int *counter) {
         case AST_CALL:      snprintf(label, sizeof(label), "Call\\n%s(): %s", node->as.call.callee, datatype_to_string(node->type)); break;
         case AST_CALL_STMT: snprintf(label, sizeof(label), "CallStmt\\n%s()", node->as.call.callee); break;
         case AST_INCDEC:    snprintf(label, sizeof(label), "IncDec\\n%s%s", node->as.incdec.name, node->as.incdec.op); break;
+        case AST_STRING_LIT: dot_escape(node->as.string_lit.value, esc, sizeof(esc)); snprintf(label, sizeof(label), "StringLit\\n\\\"%s\\\"", esc); break;
+        case AST_ARRAY_DECL: snprintf(label, sizeof(label), "ArrayDecl\\n%s %s[%d]", datatype_to_string(node->as.array_decl.elem_type), node->as.array_decl.name, node->as.array_decl.size); break;
+        case AST_ARRAY_ASSIGN: snprintf(label, sizeof(label), "ArrayAssign\\n%s[...] =", node->as.array_assign.name); break;
+        case AST_ARRAY_ACCESS: snprintf(label, sizeof(label), "ArrayAccess\\n%s[...] : %s", node->as.array_access.name, datatype_to_string(node->type)); break;
+        case AST_SWITCH: snprintf(label, sizeof(label), "Switch"); break;
+        case AST_BREAK: snprintf(label, sizeof(label), "Break"); break;
+        case AST_READ: snprintf(label, sizeof(label), "Read"); break;
         default: snprintf(label, sizeof(label), "?"); break;
     }
     fprintf(out, "  n%d [label=\"%s\", shape=box];\n", id, label);
@@ -485,6 +641,21 @@ static int dot_visit(const ASTNode *node, FILE *out, int *counter) {
                 fprintf(out, "  n%d -> n%d [label=\"arg%d\"];\n", id, c, i);
             }
             break;
+        case AST_ARRAY_ASSIGN: {
+            int ic = dot_visit(node->as.array_assign.index, out, counter); fprintf(out, "  n%d -> n%d [label=\"index\"];\n", id, ic);
+            int vc = dot_visit(node->as.array_assign.value, out, counter); fprintf(out, "  n%d -> n%d [label=\"value\"];\n", id, vc);
+            break;
+        }
+        case AST_ARRAY_ACCESS: { int c = dot_visit(node->as.array_access.index, out, counter); fprintf(out, "  n%d -> n%d [label=\"index\"];\n", id, c); break; }
+        case AST_SWITCH: {
+            int sc = dot_visit(node->as.switch_stmt.subject, out, counter); fprintf(out, "  n%d -> n%d [label=\"subject\"];\n", id, sc);
+            for (int i = 0; i < node->as.switch_stmt.case_count; i++) {
+                int bc = dot_visit(node->as.switch_stmt.cases[i].body, out, counter);
+                fprintf(out, "  n%d -> n%d [label=\"case%d\"];\n", id, bc, i);
+            }
+            break;
+        }
+        case AST_READ: { int c = dot_visit(node->as.read_stmt.target, out, counter); fprintf(out, "  n%d -> n%d;\n", id, c); break; }
         default:
             break; /* literals, identifiers, decls, incdec: no AST children to recurse into */
     }
@@ -574,6 +745,36 @@ void ast_free(ASTNode *node) {
         case AST_INCDEC:
             free(node->as.incdec.name);
             free(node->as.incdec.op);
+            break;
+
+        /* --- Advanced/unique extensions --- */
+        case AST_STRING_LIT:
+            free(node->as.string_lit.value);
+            break;
+        case AST_ARRAY_DECL:
+            free(node->as.array_decl.name);
+            break;
+        case AST_ARRAY_ASSIGN:
+            free(node->as.array_assign.name);
+            ast_free(node->as.array_assign.index);
+            ast_free(node->as.array_assign.value);
+            break;
+        case AST_ARRAY_ACCESS:
+            free(node->as.array_access.name);
+            ast_free(node->as.array_access.index);
+            break;
+        case AST_SWITCH:
+            ast_free(node->as.switch_stmt.subject);
+            for (int i = 0; i < node->as.switch_stmt.case_count; i++) {
+                ast_free(node->as.switch_stmt.cases[i].value);
+                ast_free(node->as.switch_stmt.cases[i].body);
+            }
+            free(node->as.switch_stmt.cases);
+            break;
+        case AST_BREAK:
+            break;
+        case AST_READ:
+            ast_free(node->as.read_stmt.target);
             break;
     }
     free(node);

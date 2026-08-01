@@ -25,6 +25,7 @@ typedef enum {
     TYPE_INT,
     TYPE_FLOAT,
     TYPE_BOOL,
+    TYPE_STRING,   /* advanced feature: string type — see docs/bonus_features.md */
     TYPE_VOID,     /* statements that don't produce a value (declarations, print, ...) */
     TYPE_UNKNOWN   /* not yet determined — only valid before semantic analysis runs */
 } DataType;
@@ -52,7 +53,15 @@ typedef enum {
     AST_RETURN,
     AST_FOR,
     AST_DO_WHILE,
-    AST_INCDEC      /* x++ or x-- , always used as a statement */
+    AST_INCDEC,     /* x++ or x-- , always used as a statement */
+    /* --- Advanced/unique extensions (beyond the manual's bonus list) --- */
+    AST_STRING_LIT,
+    AST_ARRAY_DECL,   /* e.g. int arr[10]; */
+    AST_ARRAY_ASSIGN, /* e.g. arr[i] = expr; */
+    AST_ARRAY_ACCESS, /* e.g. arr[i] used as a value */
+    AST_SWITCH,
+    AST_BREAK,
+    AST_READ          /* e.g. read x;  — reads user input at runtime */
 } ASTNodeKind;
 
 typedef struct ASTNode ASTNode;
@@ -149,6 +158,44 @@ typedef struct {
     char *op;         /* "++" or "--" */
 } IncDecData;
 
+/* --- Advanced/unique extensions (beyond the manual's bonus list) --- */
+
+typedef struct { char *value; } StringLitData;
+
+typedef struct {
+    DataType elem_type;   /* element type, e.g. TYPE_INT for `int arr[10];` */
+    char *name;
+    int size;              /* fixed size, must be a positive int literal at declaration */
+} ArrayDeclData;
+
+typedef struct {
+    char *name;
+    ASTNode *index;
+    ASTNode *value;
+} ArrayAssignData;
+
+typedef struct {
+    char *name;
+    ASTNode *index;
+} ArrayAccessData;
+
+/* One `case CONST: stmts` arm of a switch. `is_default` marks the
+ * (at most one) `default:` arm, in which case `value` is unused. */
+typedef struct {
+    int is_default;
+    ASTNode *value;   /* AST_INT_LIT — case labels are restricted to int constants, kept simple on purpose */
+    ASTNode *body;     /* AST_BLOCK — statements up to (and not including) `break;` */
+} SwitchCase;
+
+typedef struct {
+    ASTNode *subject;
+    SwitchCase *cases;
+    int case_count;
+    int case_capacity;
+} SwitchData;
+
+typedef struct { ASTNode *target; } ReadData;   /* target is an AST_IDENT (or AST_ARRAY_ACCESS) naming where input is stored */
+
 /* Transient parsing-helper types (NOT AST nodes) — grammar actions in
  * parser.y accumulate parameters/arguments into one of these while
  * reducing a comma-separated list, then their contents are copied into
@@ -176,6 +223,24 @@ ArgList *ast_arg_list_new(void);
 void ast_arg_list_add(ArgList *list, ASTNode *arg);
 void ast_arg_list_free(ArgList *list);       /* frees the wrapper only — ownership of `args` transfers to the CallData that consumes it */
 
+/* Transient parsing-helper (advanced feature: switch-case) — accumulates
+ * `case`/`default` arms while reducing switch_case_list, mirroring
+ * ParamList/ArgList above. `value == NULL` marks the `default:` arm. */
+typedef struct {
+    ASTNode *value;
+    ASTNode *body;
+} CaseItem;
+
+typedef struct {
+    CaseItem *items;
+    int count;
+    int capacity;
+} CaseList;
+
+CaseList *ast_case_list_new(void);
+void ast_case_list_add(CaseList *list, ASTNode *value, ASTNode *body);
+void ast_case_list_free(CaseList *list);
+
 struct ASTNode {
     ASTNodeKind kind;
     int line;
@@ -199,6 +264,13 @@ struct ASTNode {
         ForData      for_stmt;
         DoWhileData  do_while;
         IncDecData   incdec;
+        /* --- Advanced/unique extensions --- */
+        StringLitData    string_lit;
+        ArrayDeclData     array_decl;
+        ArrayAssignData   array_assign;
+        ArrayAccessData   array_access;
+        SwitchData        switch_stmt;
+        ReadData          read_stmt;
     } as;
 };
 
@@ -227,6 +299,16 @@ ASTNode *ast_new_return(int line, ASTNode *value);
 ASTNode *ast_new_for(int line, ASTNode *init, ASTNode *cond, ASTNode *update, ASTNode *body);
 ASTNode *ast_new_do_while(int line, ASTNode *body, ASTNode *cond);
 ASTNode *ast_new_incdec(int line, char *name, const char *op);
+
+/* --- Advanced/unique extensions (beyond the manual's bonus list) --- */
+ASTNode *ast_new_string_lit(int line, char *value);
+ASTNode *ast_new_array_decl(int line, DataType elem_type, char *name, int size);
+ASTNode *ast_new_array_assign(int line, char *name, ASTNode *index, ASTNode *value);
+ASTNode *ast_new_array_access(int line, char *name, ASTNode *index);
+ASTNode *ast_new_switch(int line, ASTNode *subject);
+void     ast_switch_add_case(ASTNode *sw, ASTNode *value /* NULL for default */, ASTNode *body);
+ASTNode *ast_new_break(int line);
+ASTNode *ast_new_read(int line, ASTNode *target);
 
 /* Text-based indented AST dump (project manual Section 4.3: "You must be
  * able to print or visualize the AST in some readable form"). */
